@@ -6,6 +6,7 @@ import ProcessingPreview from "@/components/ProcessingPreview";
 import DownloadPanel from "@/components/DownloadPanel";
 import {
   validateAndLoadImage,
+  applyAlphaCurve,
   ImageValidationError,
   type LoadedImage,
 } from "@/lib/imageUtils";
@@ -22,7 +23,9 @@ import {
 
 export default function Home() {
   const [image, setImage] = useState<LoadedImage | null>(null);
-  /** AI 背景除去の結果（手動補正のリセット先） */
+  /** AI 背景除去の生の結果（影除去スライダー適用前） */
+  const [aiPngRaw, setAiPngRaw] = useState<Blob | null>(null);
+  /** 影除去適用後の AI 結果（手動補正のリセット先） */
   const [aiPng, setAiPng] = useState<Blob | null>(null);
   /** 現在の透過 PNG（手動補正が反映された最新版。DL・SVG 生成の元） */
   const [currentPng, setCurrentPng] = useState<Blob | null>(null);
@@ -33,12 +36,15 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [smoothness, setSmoothness] = useState(DEFAULT_SMOOTHNESS);
+  /** 影・もや除去の強さ（0 = 無効） */
+  const [shadowCut, setShadowCut] = useState(0);
 
   const reset = useCallback(() => {
     setImage((prev) => {
       if (prev) URL.revokeObjectURL(prev.url);
       return null;
     });
+    setAiPngRaw(null);
     setAiPng(null);
     setCurrentPng(null);
     setSvgMarkup(null);
@@ -48,6 +54,7 @@ export default function Home() {
     setError(null);
     setWarning(null);
     setSmoothness(DEFAULT_SMOOTHNESS);
+    setShadowCut(0);
   }, []);
 
   const handleFileSelected = useCallback(
@@ -92,12 +99,35 @@ export default function Home() {
       }
 
       setProgress(null);
-      setAiPng(png);
-      setCurrentPng(png); // ここから下流（SVG トレース）は effect が担当
+      setAiPngRaw(png); // 影除去・SVG トレースは下流の effect が担当
       setIsProcessing(false);
     },
     [reset]
   );
+
+  // 影・もや除去：AI の生結果にアルファ閾値カーブを適用（300ms デバウンス）
+  // 変更時は手動補正もリセットされる（RefineCanvas が aiPng を基準に再初期化）
+  useEffect(() => {
+    if (!aiPngRaw) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const processed = await applyAlphaCurve(aiPngRaw, shadowCut);
+        if (!cancelled) {
+          setAiPng(processed);
+          setCurrentPng(processed);
+        }
+      } catch {
+        if (!cancelled) {
+          setError("影除去の適用中にエラーが発生しました。");
+        }
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [aiPngRaw, shadowCut]);
 
   // 手動補正の確定時：最新の透過 PNG に差し替え（SVG は effect が再生成）
   const handleEdited = useCallback((blob: Blob) => {
@@ -204,6 +234,34 @@ export default function Home() {
               progress={progress}
               isTracing={isTracing}
             />
+
+            {currentPng && (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <label
+                  htmlFor="shadowcut"
+                  className="mb-2 flex items-center justify-between text-sm font-semibold text-slate-700"
+                >
+                  <span>影・もやの除去（黒背景の写真向け）</span>
+                  <span className="font-mono text-slate-500">
+                    {shadowCut === 0 ? "オフ" : shadowCut}
+                  </span>
+                </label>
+                <input
+                  id="shadowcut"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={shadowCut}
+                  onChange={(e) => setShadowCut(Number(e.target.value))}
+                  className="w-full accent-blue-600"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  黒背景で影や半透明のもやが被写体の周りに残る場合に上げてください。
+                  ※ 変更すると手動補正（消す/戻す）はリセットされます
+                </p>
+              </div>
+            )}
 
             {currentPng && (
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
