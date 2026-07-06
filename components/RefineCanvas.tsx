@@ -151,18 +151,21 @@ export default function RefineCanvas({
   );
 
   const handlePointerDown = useCallback(
-    async (e: React.PointerEvent) => {
+    (e: React.PointerEvent) => {
       if (!ready) return;
       e.preventDefault();
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
       const canvas = canvasRef.current!;
-      // Undo 用スナップショット（GPU コピーで高速）
-      const snap = await createImageBitmap(canvas);
-      undoStack.current.push(snap);
-      if (undoStack.current.length > MAX_UNDO) {
-        undoStack.current.shift()?.close();
-      }
-      setCanUndo(true);
+      // Undo 用スナップショット。createImageBitmap は呼び出し時点の内容を
+      // 取り込むため await せず、描画開始を遅らせない（await すると
+      // 素早いドラッグの序盤の移動イベントを取りこぼす）
+      void createImageBitmap(canvas).then((snap) => {
+        undoStack.current.push(snap);
+        if (undoStack.current.length > MAX_UNDO) {
+          undoStack.current.shift()?.close();
+        }
+        setCanUndo(true);
+      });
       drawing.current = true;
       strokeMoved.current = false;
       lastPoint.current = toCanvasPoint(e);
@@ -237,6 +240,7 @@ export default function RefineCanvas({
       <div className="checkerboard flex items-center justify-center rounded p-1">
         <canvas
           ref={canvasRef}
+          data-ready={ready ? "1" : "0"}
           className="max-h-[19rem] max-w-full cursor-crosshair touch-none object-contain"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}

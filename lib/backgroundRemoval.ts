@@ -24,6 +24,12 @@ export class BackgroundRemovalError extends Error {
 
 /**
  * 背景を除去して透過 PNG の Blob を返す。
+ *
+ * 精度向上のため、AI モデルにはガンマ補正でシャドウを持ち上げた
+ * 「推論専用コピー」を渡し（黒背景×暗い被写体のエッジ対策）、
+ * 得られたアルファマスクだけを元画像に適用する。
+ * 出力の RGB 画素は元画像と完全に同一（デザイン・画質無劣化）。
+ *
  * @param image 入力画像の Blob
  * @param onProgress 進捗コールバック（モデルロード → 推論の 2 段階）
  */
@@ -33,11 +39,15 @@ export async function removeImageBackground(
 ): Promise<Blob> {
   // SSR 時にバンドルされないよう動的 import
   const { removeBackground } = await import("@imgly/background-removal");
+  const { enhanceForInference, applyMaskAlphaToOriginal } = await import(
+    "./imageUtils"
+  );
 
   let inferenceStarted = false;
 
   try {
-    const result = await removeBackground(image, {
+    const enhanced = await enhanceForInference(image);
+    const masked = await removeBackground(enhanced, {
       // アプリ自身が配信する自己ホストアセットを参照（外部 CDN 非依存）
       publicPath: new URL("/imgly-data/", window.location.origin).toString(),
       model: "isnet_fp16",
@@ -62,7 +72,8 @@ export async function removeImageBackground(
         }
       },
     });
-    return result;
+    // アルファのみ採用し、RGB は元画像から復元
+    return await applyMaskAlphaToOriginal(image, masked);
   } catch (err) {
     throw new BackgroundRemovalError(
       "背景除去処理に失敗しました。ネットワーク接続を確認のうえ、ページを再読み込みして再度お試しください。",
