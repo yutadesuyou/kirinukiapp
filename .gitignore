@@ -10,6 +10,9 @@
 /.next/
 /out/
 
+# 自己ホスト用 AI モデルアセット（scripts/fetch-model-assets.mjs で取得）
+/public/imgly-data/
+
 # production
 /build
 

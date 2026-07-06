@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "fetch-assets": "node scripts/fetch-model-assets.mjs",
+    "predev": "node scripts/fetch-model-assets.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/fetch-model-assets.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

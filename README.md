@@ -18,9 +18,11 @@ EC 商品画像の背景抜き作業を効率化する社内向け Web アプリ
 | 入力形式 | JPEG / PNG / WebP |
 | サイズ上限 | 1 枚あたり 10MB・長辺 4000px（超過時は自動縮小＋警告表示） |
 
-> ⏳ **初回のみ**、AI モデル（約 40〜80MB）のダウンロードに数秒〜十数秒かかります。
+> ⏳ **初回のみ**、AI モデル（約 90MB）の読み込みに数秒〜十数秒かかります。
 > 2 回目以降はブラウザキャッシュにより高速に処理されます。
-> ※ モデルファイルは CDN から取得しますが、**画像データが外部に送られることはありません**。
+>
+> AI モデル・WASM アセットは**このアプリ自身が配信**します（自己ホスト構成）。
+> 実行時（ブラウザ）に外部 CDN への接続は発生しないため、**社内ネットワーク限定の環境でも動作します**。
 
 ## 技術スタック
 
@@ -38,6 +40,11 @@ npm install
 # 開発サーバー起動（http://localhost:3000）
 npm run dev
 ```
+
+> `npm run dev` / `npm run build` の実行前に、AI モデルアセット（約 160MB）が
+> `public/imgly-data/` へ自動ダウンロードされます（`scripts/fetch-model-assets.mjs`）。
+> **この取得時のみインターネット接続が必要**です。取得済みの場合はスキップされます。
+> 手動で取得する場合は `npm run fetch-assets` を実行してください。
 
 ## 本番ビルド
 
@@ -83,6 +90,9 @@ docker run -p 3000:3000 kirinukiapp
   imageUtils.ts          … バリデーション・自動リサイズ・ダウンロード補助
   backgroundRemoval.ts   … @imgly/background-removal ラッパー
   svgTrace.ts            … imagetracerjs ラッパー（アルファマスク→輪郭SVG）
+/scripts
+  fetch-model-assets.mjs … AIモデルアセットの自己ホスト用ダウンロード
+/public/imgly-data       … 自己ホストされたモデル・WASM（git管理外・自動取得）
 /types
   imagetracerjs.d.ts     … imagetracerjs の型定義
 Dockerfile               … 社内サーバーデプロイ用

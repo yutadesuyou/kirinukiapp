@@ -1,8 +1,10 @@
 /**
  * @imgly/background-removal のラッパー。
- * 推論はすべてブラウザ内（WASM / WebGPU）で実行され、画像データは外部に送信されない。
- * ※ 初回のみ AI モデルファイル（約 40〜80MB）を CDN からダウンロードするため、
- *   数秒〜十数秒かかる。2 回目以降はブラウザキャッシュが使われる。
+ * 推論はすべてブラウザ内（WASM）で実行され、画像データは外部に送信されない。
+ *
+ * AI モデル・WASM アセットはこのアプリ自身（/imgly-data/）から配信される
+ * 自己ホスト構成のため、実行時に外部 CDN への接続は発生しない。
+ * ※ 初回のみモデルの読み込みに数秒〜十数秒かかる。2 回目以降はキャッシュが使われる。
  */
 
 export type RemovalStage = "loading-model" | "inference";
@@ -36,6 +38,10 @@ export async function removeImageBackground(
 
   try {
     const result = await removeBackground(image, {
+      // アプリ自身が配信する自己ホストアセットを参照（外部 CDN 非依存）
+      publicPath: new URL("/imgly-data/", window.location.origin).toString(),
+      model: "isnet_fp16",
+      device: "cpu",
       output: {
         format: "image/png",
         quality: 1.0,
