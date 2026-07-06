@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ImageDropzone from "@/components/ImageDropzone";
 import ProcessingPreview from "@/components/ProcessingPreview";
 import DownloadPanel from "@/components/DownloadPanel";
@@ -22,8 +22,10 @@ import {
 
 export default function Home() {
   const [image, setImage] = useState<LoadedImage | null>(null);
-  const [transparentPng, setTransparentPng] = useState<Blob | null>(null);
-  const [transparentUrl, setTransparentUrl] = useState<string | null>(null);
+  /** AI 背景除去の結果（手動補正のリセット先） */
+  const [aiPng, setAiPng] = useState<Blob | null>(null);
+  /** 現在の透過 PNG（手動補正が反映された最新版。DL・SVG 生成の元） */
+  const [currentPng, setCurrentPng] = useState<Blob | null>(null);
   const [svgMarkup, setSvgMarkup] = useState<string | null>(null);
   const [progress, setProgress] = useState<RemovalProgress | null>(null);
   const [isTracing, setIsTracing] = useState(false);
@@ -32,25 +34,13 @@ export default function Home() {
   const [warning, setWarning] = useState<string | null>(null);
   const [smoothness, setSmoothness] = useState(DEFAULT_SMOOTHNESS);
 
-  // スライダー変更時の再トレースを管理（連続変更時は最後の値のみ反映）
-  const traceSeqRef = useRef(0);
-
-  const revokeUrls = useCallback(() => {
+  const reset = useCallback(() => {
     setImage((prev) => {
       if (prev) URL.revokeObjectURL(prev.url);
-      return prev;
+      return null;
     });
-    setTransparentUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return prev;
-    });
-  }, []);
-
-  const reset = useCallback(() => {
-    revokeUrls();
-    setImage(null);
-    setTransparentPng(null);
-    setTransparentUrl(null);
+    setAiPng(null);
+    setCurrentPng(null);
     setSvgMarkup(null);
     setProgress(null);
     setIsTracing(false);
@@ -58,40 +48,12 @@ export default function Home() {
     setError(null);
     setWarning(null);
     setSmoothness(DEFAULT_SMOOTHNESS);
-  }, [revokeUrls]);
-
-  const runTrace = useCallback(
-    async (png: Blob, smooth: number) => {
-      const seq = ++traceSeqRef.current;
-      setIsTracing(true);
-      setSvgMarkup(null);
-      try {
-        const svg = await traceToSvg(png, { smoothness: smooth });
-        if (traceSeqRef.current === seq) {
-          setSvgMarkup(svg);
-        }
-      } catch (err) {
-        if (traceSeqRef.current === seq) {
-          setError(
-            err instanceof SvgTraceError
-              ? err.message
-              : "SVG パスの抽出中に予期しないエラーが発生しました。"
-          );
-        }
-      } finally {
-        if (traceSeqRef.current === seq) {
-          setIsTracing(false);
-        }
-      }
-    },
-    []
-  );
+  }, []);
 
   const handleFileSelected = useCallback(
     async (file: File) => {
       reset();
       setIsProcessing(true);
-      setError(null);
 
       let loaded: LoadedImage;
       try {
@@ -130,26 +92,45 @@ export default function Home() {
       }
 
       setProgress(null);
-      setTransparentPng(png);
-      setTransparentUrl(URL.createObjectURL(png));
-
-      // SVG トレース
-      await runTrace(png, DEFAULT_SMOOTHNESS);
+      setAiPng(png);
+      setCurrentPng(png); // ここから下流（SVG トレース）は effect が担当
       setIsProcessing(false);
     },
-    [reset, runTrace]
+    [reset]
   );
 
-  // スライダー変更時に再トレース（300ms デバウンス）
+  // 手動補正の確定時：最新の透過 PNG に差し替え（SVG は effect が再生成）
+  const handleEdited = useCallback((blob: Blob) => {
+    setCurrentPng(blob);
+  }, []);
+
+  // 透過 PNG／滑らかさが変わったら SVG を再トレース（300ms デバウンス）
   useEffect(() => {
-    if (!transparentPng) return;
-    const timer = setTimeout(() => {
-      void runTrace(transparentPng, smoothness);
+    if (!currentPng) return;
+    let cancelled = false;
+    setIsTracing(true);
+    const timer = setTimeout(async () => {
+      try {
+        const svg = await traceToSvg(currentPng, { smoothness });
+        if (!cancelled) setSvgMarkup(svg);
+      } catch (err) {
+        if (!cancelled) {
+          setSvgMarkup(null);
+          setError(
+            err instanceof SvgTraceError
+              ? err.message
+              : "SVG パスの抽出中に予期しないエラーが発生しました。"
+          );
+        }
+      } finally {
+        if (!cancelled) setIsTracing(false);
+      }
     }, 300);
-    return () => clearTimeout(timer);
-    // transparentPng 設定直後の初回トレースは handleFileSelected 側で実行済み
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [smoothness]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [currentPng, smoothness]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
@@ -199,6 +180,11 @@ export default function Home() {
               <p className="text-sm text-slate-600">
                 <span className="font-medium">{image.baseName}</span>（
                 {image.width}×{image.height}px）
+                {currentPng && (
+                  <span className="ml-2 text-xs text-slate-500">
+                    出力サイズ：{image.width}×{image.height}px（元画像と同一・無劣化）
+                  </span>
+                )}
               </p>
               <button
                 type="button"
@@ -211,13 +197,15 @@ export default function Home() {
 
             <ProcessingPreview
               originalUrl={image.url}
-              transparentUrl={transparentUrl}
+              originalBlob={image.blob}
+              aiResult={aiPng}
+              onEdited={handleEdited}
               svgMarkup={svgMarkup}
               progress={progress}
               isTracing={isTracing}
             />
 
-            {transparentPng && (
+            {currentPng && (
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <label
                   htmlFor="smoothness"
@@ -248,7 +236,7 @@ export default function Home() {
 
             <DownloadPanel
               baseName={image.baseName}
-              transparentPng={transparentPng}
+              transparentPng={currentPng}
               svgMarkup={svgMarkup}
             />
           </>
