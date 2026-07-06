@@ -1,10 +1,15 @@
 "use client";
 
 import type { RemovalProgress } from "@/lib/backgroundRemoval";
+import RefineCanvas from "./RefineCanvas";
 
 interface ProcessingPreviewProps {
   originalUrl: string;
-  transparentUrl: string | null;
+  originalBlob: Blob;
+  /** AI 背景除去の結果（null = 未完了） */
+  aiResult: Blob | null;
+  /** 手動補正の確定時に編集後 PNG を通知 */
+  onEdited: (blob: Blob) => void;
   svgMarkup: string | null;
   progress: RemovalProgress | null;
   isTracing: boolean;
@@ -45,12 +50,14 @@ function PanelFrame({
 }
 
 /**
- * 元画像／透過 PNG／SVG 輪郭の 3 面比較プレビュー。
+ * 元画像／透過 PNG（手動補正可）／SVG 輪郭の 3 面比較プレビュー。
  * 処理中はプログレス（モデルロード → 推論の 2 段階）を表示する。
  */
 export default function ProcessingPreview({
   originalUrl,
-  transparentUrl,
+  originalBlob,
+  aiResult,
+  onEdited,
   svgMarkup,
   progress,
   isTracing,
@@ -66,16 +73,13 @@ export default function ProcessingPreview({
         />
       </PanelFrame>
 
-      <PanelFrame title="② 背景除去（透過PNG）">
-        {transparentUrl ? (
-          <div className="checkerboard flex max-h-96 items-center justify-center rounded p-1">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={transparentUrl}
-              alt="背景除去後の透過PNG"
-              className="max-h-[23rem] max-w-full object-contain"
-            />
-          </div>
+      <PanelFrame title="② 背景除去（手動補正できます）">
+        {aiResult ? (
+          <RefineCanvas
+            originalBlob={originalBlob}
+            aiResult={aiResult}
+            onEdited={onEdited}
+          />
         ) : progress ? (
           <div className="w-full max-w-xs space-y-3 text-center">
             <p className="text-sm font-medium text-slate-700">
